@@ -1,0 +1,393 @@
+#!/bin/bash
+
+if ! command -v jq &> /dev/null; then
+    echo "Error: 'jq' is required but not installed."
+    exit 1
+fi
+
+# Relaunch the script with an interactive shell
+if [[ $- != *i* ]]; then
+  exec bash -i "$0" "$@"
+  exit
+fi
+
+# Check if a JSON file was passed as an argument, otherwise default to menu.json
+if [ -z "$1" ]; then
+  _MenuFile="menu.json"
+else
+  _MenuFile="$1"
+fi
+_menu_stack=()
+
+# Global Vars
+# Read the JSON file and extract the menu items
+_menus_cache=$(jq -c '.Menus[]' $_MenuFile)
+if [ $? -ne 0 ]; then
+    echo "Error: Could not parse JSON file '$_MenuFile'. Please check if the file is valid."
+    exit 1
+fi
+# Read the JSON file to get the start menu
+start_menu=$(jq -r '.StartMenu' $_MenuFile)
+
+_menu_row=$(jq -r '.MenuRow // 3' $_MenuFile)
+_menu_col=$(jq -r '.MenuCol // 10' $_MenuFile)
+_menu_row_offset=$(jq -r '.MenuItemsRowOffset // 2' $_MenuFile)
+_item_desc_col=$(jq -r '.ItemDescCol // 40' $_MenuFile)
+_item_desc_width=$(jq -r '.ItemDescWidth // 25' $_MenuFile)
+
+# Read the JSON file and extract the interactive commands list
+_exec_commands=$(jq -r '.CommandsToExec[]' "$_MenuFile")
+
+
+color() {
+  local color_name=$1
+  case "$color_name" in
+    "black") echo "\e[30m" ;;
+    "red") echo "\e[31m" ;;
+    "green") echo "\e[32m" ;;
+    "yellow") echo "\e[33m" ;;
+    "blue") echo "\e[34m" ;;
+    "magenta") echo "\e[35m" ;;
+    "cyan") echo "\e[36m" ;;
+    "white") echo "\e[37m" ;;
+    "bright_black") echo "\e[90m" ;;
+    "bright_red") echo "\e[91m" ;;
+    "lime") echo "\e[92m" ;; 
+    "bright_yellow") echo "\e[93m" ;;
+    "bright_blue") echo "\e[94m" ;;
+    "bright_magenta") echo "\e[95m" ;;
+    "bright_cyan") echo "\e[96m" ;;
+    "bright_white") echo "\e[97m" ;;
+    *) echo "\e[0m" ;;  # Default to reset if no match
+  esac
+}
+
+_clrTitle=$(color $(jq -r '.MenuTitleColor // "green"' $_MenuFile))
+_clrDesc=$(color $(jq -r '.MenuDescColor // "magenta"' $_MenuFile))
+_clrIndex=$(color $(jq -r '.MenuIndexColor // "yellow"' $_MenuFile))
+_clrItem=$(color $(jq -r '.MenuItemColor // "cyan"' $_MenuFile))
+_clrSel=$(color $(jq -r '.MenuSelIndexColor // "green"' $_MenuFile))
+_clrSelDesc=$(color $(jq -r '.MenuSelDescColor // "yellow"' $_MenuFile))   
+_X=$(color reset)
+
+move_cursor() { # Function to move the cursor to a specific position
+  local row=$1
+  local col=$2
+  echo -ne "\033[${row};${col}H"
+}
+
+split_string() { #Splits a string into multiple arrays of strings of a given length
+  local string="$1"
+  local length=$2
+  local result=()
+  local part=""
+
+  for word in $string; do
+    if [ ${#part} -eq 0 ]; then
+      part=$word
+    elif [ $((${#part} + ${#word} + 1)) -le $length ]; then
+      part="$part $word"
+    else
+      result+=("$part")
+      part=$word
+    fi
+  done
+  # Add the last part
+  if [ ${#part} -ne 0 ]; then
+    result+=("$part")
+  fi
+  # Print each part on a new line
+  for part in "${result[@]}"; do
+    echo "$part"
+  done
+}
+
+block_write() {
+  local row=$1
+  local col=$2
+  local lngth=$3
+  local max_rows=$4
+  local outString="$5"
+
+  # Read the split_string output into an array
+  IFS=$'\n' read -d '' -r -a splits < <(split_string "$outString" $lngth)
+
+  local num_splits=${#splits[@]}
+  local rows_to_print=$((num_splits < max_rows ? num_splits : max_rows))
+
+  for ((i = 0; i < rows_to_print; i++)); do
+    move_cursor $row $col
+    # Print the part and fill the rest of the line with spaces up to the specified length
+    printf "%-${lngth}s" "${splits[$i]}"
+    ((row += 1))
+  done
+
+  # Blank out remaining rows if any
+  for ((i = rows_to_print; i < max_rows; i++)); do
+    move_cursor $row $col
+    printf "%-${lngth}s" ""
+    ((row += 1))
+  done
+}
+
+print_menu_item() {
+  local item_name=$1
+  local item_row=$2
+  local index=$3
+  local is_selected=$4
+
+  move_cursor $item_row $_menu_col
+
+  if [ "$is_selected" -eq 1 ]; then
+    echo -e "${_clrSel}> ${_clrIndex}$index. ${_clrSel}$item_name${_X}"
+  else
+    echo -e "${_clrIndex}  $index. ${_clrItem}$item_name${_X}"
+  fi
+}
+
+print_item_desc() {
+  item_desc=$1
+
+  row=$(($_menu_row + ${_menu_row_offset}))
+  move_cursor $row $_item_desc_col
+  echo -e "${_clrSelDesc}"
+  block_write $row $_item_desc_col $_item_desc_width 3 "$item_desc"
+  echo -e "${_X}"
+}
+
+sel_menu_item() {
+  local menu_items=$1
+  local selected_index=$2
+  local prev_selected_index=$3
+
+  stty -echo # Disable key strokes  
+  # Update selected menu items with colors
+  local i=1
+  local selected_desc=""
+  local item_row=$(($_menu_row + ${_menu_row_offset}))
+  while IFS= read -r item; do
+    item_name=$(echo "$item" | base64 --decode | jq -r '.Name')
+    item_desc=$(echo "$item" | base64 --decode | jq -r '.Description // ""')
+
+    if [ $i -eq $prev_selected_index ]; then
+      print_menu_item "$item_name" $item_row $i 0
+    fi
+
+    if [ $i -eq $selected_index ]; then
+      print_menu_item "$item_name" $item_row $i 1
+      selected_desc=$item_desc
+    fi
+ 
+    item_row=$((item_row + 1))
+    i=$((i + 1))
+  done <<< "$menu_items"
+  # Process Last item (Back or Exit)
+  if [ $i -eq $selected_index ]; then
+    print_menu_item "$LastItem" $item_row $i 1
+    selected_desc=""
+  fi  
+  if [ $i -eq $prev_selected_index ]; then
+    print_menu_item "$LastItem" $item_row $i 0
+  fi
+
+  print_item_desc "$selected_desc"
+
+  # Move the cursor to the bottom after the EXIT or BACK item
+  move_cursor $((item_row + 2)) 1
+  stty echo # Re-enable key strokes
+}
+
+build_menu() {
+  local menu_name=$1
+  local desc=$2
+  local menu_items=$3
+  local clear_screen=$4
+
+  # Clear the screen if needed
+  if [ "$clear_screen" == "true" ]; then
+    clear
+  fi
+
+  # Display the menu name and description with colors
+  move_cursor $_menu_row $_menu_col
+  echo -e "${_clrTitle}Menu: $menu_name${_X}"
+  if [ "$desc" != "null" ]; then
+    move_cursor $((_menu_row + 1)) $_menu_col
+    echo -e "${_clrDesc}$desc${_X}"
+  fi
+
+  # Display the menu items with colors
+  local i=1
+  local selected_desc=""
+  local item_row=$(($_menu_row + ${_menu_row_offset}))
+  while IFS= read -r item; do
+    item_name=$(echo "$item" | base64 --decode | jq -r '.Name')
+    item_desc=$(echo "$item" | base64 --decode | jq -r '.Description')
+    print_menu_item "$item_name" $item_row $i 0
+
+    item_row=$((item_row + 1))
+    i=$((i + 1))
+  done <<< "$menu_items"
+
+  if [ "$menu_name" == "$start_menu" ]; then
+    LastItem="EXIT"
+  else  
+    LastItem="BACK"
+  fi
+
+  print_menu_item "$LastItem" $item_row $i 0
+
+  sel_menu_item "$menu_items" "1" "0" #Set initial menu selection to first item
+}
+
+get_menu_items() {
+  local menu_name="$1"
+  echo "$_menus_cache" | jq -r --arg menu_name "$menu_name" '. | select(.Name == $menu_name) | .Items[] | @base64'
+}
+
+get_menu_desc() {
+  local menu_name="$1"
+  echo "$_menus_cache" | jq -r --arg menu_name "$menu_name" '. | select(.Name == $menu_name) | .Description // ""'
+}
+
+# Function to check if a command is interactive
+is_exec_command() {
+  local theCmd=$1
+  for cmd in $_exec_commands; do
+    if [[ "$theCmd" =~ $cmd ]]; then
+      return 0  # Command is interactive
+    fi
+  done
+  return 1  # Command is not interactive
+}
+
+run_cmd() {
+  local theCmd=$1
+
+  # If it's an interactive command like nano or vim
+  if is_exec_command "theCmd"; then
+    echo "Executing $theCmd"
+
+ #   "$theCmd" </dev/tty >/dev/tty 2>/dev/tty
+     exec </dev/tty
+    "$theCmd" || { echo "Error executing command: $theCmd"; return; }
+
+    echo -e "\nCommand finished. Press any key to return to the menu."
+    read -n 1 </dev/tty # Wait for the user to press a key before returning to the menu
+  else
+    echo "Running command: $theCmd"
+    eval "$theCmd"
+  fi
+
+  echo -e "\nCommand finished. Press any key to return to the menu."
+  read -n 1  # Wait for the user to press a key before returning to the menu
+}
+
+# Function to display a menu
+process_menu() {
+  local menu_name=$1
+  local selected_index=1
+  local prev_selected_index=0
+  local initial_display=true
+
+  menu_items=$(get_menu_items "$menu_name")
+  menu_description=$(get_menu_desc "$menu_name")
+
+  # Initial build of the menu
+  build_menu "$menu_name" "$menu_description" "$menu_items" "true"
+
+  while true; do
+    # Get user selection
+    if [ "$initial_display" == "true" ]; then
+      read -s -n 1 key
+      initial_display=false
+    else
+      read -s -n 1 key
+    fi
+
+    prev_selected_index=$selected_index
+
+    case $key in
+      $'\x1b') # Handle arrow keys
+        read -s -n 2 -t 0.1 key
+        case $key in
+          '[A' |'[D') # Up arrow or Left arrow
+            selected_index=$((selected_index - 1))
+            ;;
+          '[B' | '[C') # Down arrow or Right Arrow
+            selected_index=$((selected_index + 1))
+            ;;
+        esac
+        
+        # Handle wrapping around the menu selection
+        local max_index=$(( $(echo "$menu_items" | wc -l) + 1 ))
+        if [ $selected_index -lt 1 ]; then #Go to the last line item
+          selected_index=$max_index
+        elif [ $selected_index -gt $max_index ]; then
+          selected_index=1
+        fi
+        ;;
+      '') # Enter key
+        break
+        ;;
+      [0-9]) # Number keys
+        
+        selected_index=$key
+        ;;
+    esac
+
+    # Update the menu with the new selection
+    sel_menu_item "$menu_items" "$selected_index" "$prev_selected_index" 
+  done
+
+  # Process the selection only when Enter key is pressed
+  if [ -z "$key" ]; then
+    i=1
+    valid_selection=0
+    while IFS= read -r item; do
+      if [ "$selected_index" -eq "$i" ]; then
+        valid_selection=1
+        decoded_item=$(echo "$item" | base64 --decode)
+        item_command=$(echo "$decoded_item" | jq -r '.Command')
+        item_menu=$(echo "$decoded_item" | jq -r '.Menu')
+        subMenu=0
+        if [ -n "$item_command" ] && [ "$item_command" != "null" ]; then
+          run_cmd "$item_command"
+        elif [ -n "$item_menu" ] && [ "$item_menu" != "null" ]; then
+          subMenu=1
+        fi
+      fi
+      i=$((i + 1))
+    done <<< "$menu_items"
+
+    # Handle EXIT or BACK option
+    if [ "$selected_index" -eq "$i" ]; then
+      valid_selection=1
+      if [ "$menu_name" == "$start_menu" ]; then
+        exit 0
+      else
+        last_menu=${_menu_stack[-1]}
+        unset _menu_stack[-1] #Pop out the last menu item
+        process_menu "$last_menu"
+        return
+      fi
+    fi
+
+    if [ $subMenu -eq 1 ]; then
+      _menu_stack+=("$menu_name") #Push in current Menu item to come back to later
+      process_menu "$item_menu" 
+    else
+      # Prompt to return to the menu
+      echo ""
+      read -p "Press any key to continue..." 
+      process_menu "$menu_name"
+    fi 
+  fi
+}
+
+
+# Start with the specified start menu
+while true; do
+  process_menu "$start_menu"
+done
+clear

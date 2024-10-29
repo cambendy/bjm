@@ -1,0 +1,86 @@
+{
+    "StartMenu": "Main Menu",
+    "MenuRow": 3,
+    "MenuCol": 10,
+    "MenuItemsRowOffset" : 3,
+    "ItemDescCol" : 45,
+    "ItemDescWidth" : 25,
+    "MenuTitleColor" : "green",
+    "MenuDescColor" : "magenta",
+    "MenuIndexColor" : "yellow",
+    "MenuSelIndexColor" : "red",
+    "MenuSelDescColor" : "yellow",
+    "CommandsToExec": [
+      "less",
+      "more"
+    ],
+    "Menus": [
+      {
+        "Name": "Main Menu",
+        "Description": "This is where it all begins",
+        "Items": [
+          {
+            "Name": "List it",
+            "Command": "ls -lah",
+            "Description": "Runs a list command using the -lah parameters"
+          },
+          {
+            "Name": "Menu 2",
+            "Menu": "M2",
+            "Description": "Jump to a different menu."
+          },
+          {
+            "Name": "A different Menu ",
+            "Menu": "M4",
+            "Description": "Jump to menu 4."
+          }
+        ]
+      },
+      {
+        "Name": "M2",
+        "Description": "The sub menu of all sub menus",       
+        "Items": [
+          {
+            "Name": "List the DIR, duh",
+            "Command": "ls",
+            "Description": "Runs the ls command. Equiv of dir in DOS!"
+          },
+          {
+            "Name": "FUN",
+            "Command": "echo curl up'n'die"
+          },
+          {
+            "Name": "The depths",
+            "Menu": "M3"
+          }
+        ]
+      },
+      {
+        "Name": "M3",
+        "Description": "Plumbing the depths",       
+        "Items": [
+          {
+            "Name": "Cat's are not dogs",
+            "Command": "cat menu.json",
+            "Description": "Dogs are definitely better than cats. Cats are hunter killers."
+          }
+        ]
+      },
+      {
+        "Name": "M4",
+        "Description": "Secret Squirrel menu",       
+        "Items": [
+          {
+            "Name": "Need head",
+            "Command": "head menu.json",
+            "Description": "Everyone likes a little head."
+          },
+          {
+            "Name": "Got tail",
+            "Command": "tail menu.json",
+            "Description": "Grab a piece of tail."
+          }
+        ]
+      }
+    ]
+  }
