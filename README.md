@@ -12,7 +12,7 @@ This allows the user to create a menu system that is driven completely by a sing
   
   ```sudo chmod bjm 755 ```
 
-  This should dod the trick for you.
+  This should do the trick for you.
 
 - Define your JSON file. 
 
