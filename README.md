@@ -1,10 +1,18 @@
-# BJM - **Build Just Menu**
+# Bash JSON Menu - **Build Just Menu**
 
 *A Bash JSON Menu solution*
 
 This allows the user to create a menu system that is driven completely by a single JSON file, as documented below.
 
 ## Use
+
+- Place the bjm file in your run path... somewhere!
+
+    Make certain to set the file to be executable.
+  
+  ```sudo chmod bjm 7555 ```
+
+  This should dod the trick for you.
 
 - Define your JSON file. 
 
