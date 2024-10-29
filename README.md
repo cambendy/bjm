@@ -10,7 +10,7 @@ This allows the user to create a menu system that is driven completely by a sing
 
     Make certain to set the file to be executable.
   
-  ```sudo chmod bjm 7555 ```
+  ```sudo chmod bjm 755 ```
 
   This should dod the trick for you.
 
